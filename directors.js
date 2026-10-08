@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "tv.rex.directors",
   title: "精选导演",
-  version: "1.6.0",
+  version: "1.7.0",
   requiredVersion: "0.0.1",
   description: "15位精选导演",
   author: "xwzbsxpz-netizen",
@@ -17,6 +17,7 @@ WidgetMetadata = {
     }
   ]
 };
+
 
 const GITHUB_BASE =
   "https://raw.githubusercontent.com/xwzbsxpz-netizen/rex-d/main/";
@@ -109,12 +110,17 @@ function imageUrl(filename) {
 /**
  * 导演列表
  *
- * 点击这里的导演：
- * director:7467
- * director:1032
- * ...
+ * 每一位导演本身是一个 URL 类型的入口。
  *
- * 然后由 loadDetail() 根据导演 ID 查询该导演的作品。
+ * 例如：
+ *
+ * David Fincher
+ *      ↓
+ * director:7467
+ *
+ * Martin Scorsese
+ *      ↓
+ * director:1032
  */
 async function loadList(params) {
   return DIRECTORS.map((director) => {
@@ -127,10 +133,11 @@ async function loadList(params) {
 
       title: director.name,
 
-      // 两个都给，避免不同封面布局只读取其中一个字段
+      // 导演自己的图片
       posterPath: image,
       backdropPath: image,
 
+      // 点击后交给 loadDetail()
       link: link
     };
   });
@@ -138,58 +145,50 @@ async function loadList(params) {
 
 
 /**
- * 导演详情
+ * 导演作品列表
  *
- * 注意：
- * 这里不再返回 person 个人详情。
+ * 点击某位导演以后：
  *
- * 原来的逻辑：
- *
- * director
- *   ↓
- * person/7467
- *   ↓
- * 大卫·芬奇个人简介页
- *   ↓
- * relatedItems
- *   ↓
- * 电影
- *
- * 现在改成：
- *
- * director
- *   ↓
- * person/7467/combined_credits
- *   ↓
- * 筛选 Director / Co-Director
- *   ↓
- * 直接返回电影列表
- *
- * 所以：
- *
- * 点击 David Fincher
- *   ↓
- * 直接看到 David Fincher 的电影
- *
- * 点击具体电影
- *   ↓
- * TMDB 电影详情页
+ * director:id
+ *      ↓
+ * person/id/combined_credits
+ *      ↓
+ * cast + crew
+ *      ↓
+ * 只保留 movie
+ *      ↓
+ * 去重
+ *      ↓
+ * 返回这个导演参与过的所有电影
  */
 async function loadDetail(link) {
   const key = String(link || "");
 
+  // 不是我们的导演链接，直接忽略
   if (!key.startsWith("director:")) {
     return null;
   }
 
-  const id = Number(key.slice("director:".length));
+  // 提取 TMDB person ID
+  const id = Number(
+    key.slice("director:".length)
+  );
 
   if (!Number.isFinite(id)) {
     return null;
   }
 
 
-  // 获取导演的全部影视演职员信息
+  /**
+   * 获取导演完整影视参与记录
+   *
+   * combined_credits 中包含：
+   *
+   * cast
+   * crew
+   *
+   * 这里两个都读取。
+   */
   const credits = await Widget.tmdb.get(
     "person/" + id + "/combined_credits",
     {
@@ -205,103 +204,151 @@ async function loadDetail(link) {
 
 
   const works = [];
+
+  // 防止同一部电影同时出现在 cast / crew 中
   const seen = {};
 
 
-  // combined_credits 的 crew 中筛选导演作品
-  if (Array.isArray(credits.crew)) {
-    for (const item of credits.crew) {
-      if (!item || !item.id) {
-        continue;
-      }
+  /**
+   * 处理电影
+   *
+   * cast 和 crew 使用完全相同的处理逻辑，
+   * 最终合并成一个电影列表。
+   */
+  function addMovie(item) {
+    if (!item || !item.id) {
+      return;
+    }
 
-      // 只处理电影和电视剧
-      if (
-        item.media_type !== "movie" &&
-        item.media_type !== "tv"
-      ) {
-        continue;
-      }
+    // 只要电影
+    //
+    // 不显示 TV
+    // 不显示 TV Movie
+    // 不显示其他媒体类型
+    if (item.media_type !== "movie") {
+      return;
+    }
 
-      // 必须属于导演部门
-      if (item.department !== "Directing") {
-        continue;
-      }
+    const workKey = "movie:" + item.id;
 
-      // 只接受导演职位
-      if (
-        item.job &&
-        item.job !== "Director" &&
-        item.job !== "Co-Director"
-      ) {
-        continue;
-      }
+    // 去重
+    if (seen[workKey]) {
+      return;
+    }
 
-
-      const workKey =
-        item.media_type + ":" + item.id;
-
-      // 去重
-      if (seen[workKey]) {
-        continue;
-      }
-
-      seen[workKey] = true;
+    seen[workKey] = true;
 
 
-      works.push({
-        id: item.id,
-        type: "tmdb",
-        mediaType: item.media_type,
+    works.push({
+      id: item.id,
 
-        title:
-          item.title ||
-          item.name ||
-          "",
+      // TMDB 内置详情
+      type: "tmdb",
 
-        posterPath:
-          item.poster_path || null,
+      mediaType: "movie",
 
-        backdropPath:
-          item.backdrop_path || null,
+      title:
+        item.title ||
+        item.name ||
+        "",
 
-        releaseDate:
-          item.release_date ||
-          item.first_air_date ||
-          "",
+      posterPath:
+        item.poster_path || null,
 
-        rating:
-          typeof item.vote_average === "number"
-            ? item.vote_average
-            : 0,
+      backdropPath:
+        item.backdrop_path || null,
 
-        description:
-          item.overview || ""
-      });
+      releaseDate:
+        item.release_date ||
+        "",
+
+      rating:
+        typeof item.vote_average === "number"
+          ? item.vote_average
+          : 0,
+
+      description:
+        item.overview ||
+        ""
+    });
+  }
+
+
+  /**
+   * =========================
+   * Cast
+   * =========================
+   *
+   * 导演如果同时在某些电影里担任演员，
+   * 这些电影也会被纳入。
+   */
+  if (Array.isArray(credits.cast)) {
+    for (const item of credits.cast) {
+      addMovie(item);
     }
   }
 
 
-  // 按上映日期从新到旧
+  /**
+   * =========================
+   * Crew
+   * =========================
+   *
+   * 不限制 department。
+   *
+   * 不限制 job。
+   *
+   * 只要 TMDB 的 crew 中有这部电影，
+   * 就把它作为这个人的参与电影加入。
+   */
+  if (Array.isArray(credits.crew)) {
+    for (const item of credits.crew) {
+      addMovie(item);
+    }
+  }
+
+
+  /**
+   * =========================
+   * 按上映日期排序
+   * =========================
+   *
+   * 新片在前。
+   *
+   * 没有上映日期的电影放到最后。
+   */
   works.sort((a, b) => {
-    return String(b.releaseDate || "").localeCompare(
-      String(a.releaseDate || "")
-    );
+    const dateA = String(a.releaseDate || "");
+    const dateB = String(b.releaseDate || "");
+
+    if (!dateA && !dateB) {
+      return 0;
+    }
+
+    if (!dateA) {
+      return 1;
+    }
+
+    if (!dateB) {
+      return -1;
+    }
+
+    return dateB.localeCompare(dateA);
   });
 
 
-  // 直接返回作品数组
-  //
-  // 不再：
-  // {
-  //   type: "url",
-  //   title: person.name,
-  //   posterPath: person.profile_path,
-  //   description: person.biography,
-  //   relatedItems: works
-  // }
-  //
-  // 而是直接把 works 交给 ForwardWidget
-  // 作为这个导演对应的内容列表。
-  return works.slice(0, 40);
+  /**
+   * 直接返回电影数组。
+   *
+   * 不返回：
+   *
+   * person
+   * biography
+   * profile_path
+   * relatedItems
+   *
+   * 因此点击导演后不会再进入
+   * “大卫·芬奇个人详情页”。
+   */
+  return works;
 }
