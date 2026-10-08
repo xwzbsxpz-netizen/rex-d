@@ -1,11 +1,22 @@
 WidgetMetadata = {
   id: "tv.rex.directors",
   title: "精选导演",
-  version: "1.3.0",
+  version: "1.4.0",
   requiredVersion: "0.0.1",
   description: "15位精选导演",
   author: "xwzbsxpz-netizen",
-  type: "home" // 关键修改 1：声明为主页横向模块
+  site: "https://github.com/xwzbsxpz-netizen/rex-d",
+  
+  // 恢复规范强制要求的 modules 数组
+  modules: [
+    {
+      id: "loadList",
+      title: "Featured Directors",
+      functionName: "loadList",
+      cacheDuration: 86400,
+      params: []
+    }
+  ]
 };
 
 const GITHUB_BASE = "https://raw.githubusercontent.com/xwzbsxpz-netizen/rex-d/main/";
@@ -28,28 +39,17 @@ const DIRECTORS = [
   { id: 608, name: "Hayao Miyazaki", image: "05DD4577-A3F8-4FD4-97C3-99CE9BF4CBB6.png" }
 ];
 
-async function getHomeSections() {
-  return [
-    {
-      id: "section_directors",
-      title: "Featured Directors",
-      style: "landscape",
-      aspectRatio: 1.78,
-      items: DIRECTORS.map(director => ({
-        id: `person_${director.id}`,
-        title: director.name,
-        backdropPath: GITHUB_BASE + director.image,
-        
-        // 关键修改 2：调用原生人物卡片，实现本地库自动聚合
-        type: "person",
-        action: "open_person",
-        target: "rex://person/detail", 
-        params: {
-          id: director.id,
-          name: director.name,
-          role: "director"
-        }
-      }))
-    }
-  ];
+async function loadList(params) {
+  return DIRECTORS.map(director => ({
+    id: director.id,
+    
+    // 核心修改：弃用 url，声明为原生 tmdb 人物类型，触发系统内置聚合机制
+    type: "tmdb",
+    mediaType: "person", 
+    title: director.name,
+    
+    // 同时赋予两个字段，确保在宽列表或竖列表中都能加载出你的自定义图片
+    backdropPath: GITHUB_BASE + director.image,
+    posterPath: GITHUB_BASE + director.image
+  }));
 }
