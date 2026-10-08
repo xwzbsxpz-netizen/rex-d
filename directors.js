@@ -1,17 +1,16 @@
 WidgetMetadata = {
   id: "tv.rex.directors",
   title: "精选导演",
-  version: "1.4.0",
+  version: "1.5.0",
   requiredVersion: "0.0.1",
   description: "15位精选导演",
   author: "xwzbsxpz-netizen",
   site: "https://github.com/xwzbsxpz-netizen/rex-d",
-  
-  // 恢复规范强制要求的 modules 数组
+  detailCacheDuration: 86400,
   modules: [
     {
       id: "loadList",
-      title: "Featured Directors",
+      title: "Directors",
       functionName: "loadList",
       cacheDuration: 86400,
       params: []
@@ -39,17 +38,74 @@ const DIRECTORS = [
   { id: 608, name: "Hayao Miyazaki", image: "05DD4577-A3F8-4FD4-97C3-99CE9BF4CBB6.png" }
 ];
 
+function imageUrl(filename) {
+  return GITHUB_BASE + filename;
+}
+
 async function loadList(params) {
-  return DIRECTORS.map(director => ({
-    id: director.id,
-    
-    // 核心修改：弃用 url，声明为原生 tmdb 人物类型，触发系统内置聚合机制
-    type: "tmdb",
-    mediaType: "person", 
-    title: director.name,
-    
-    // 同时赋予两个字段，确保在宽列表或竖列表中都能加载出你的自定义图片
-    backdropPath: GITHUB_BASE + director.image,
-    posterPath: GITHUB_BASE + director.image
-  }));
+  return DIRECTORS.map((director) => {
+    const link = "director:" + director.id;
+    return {
+      id: link,
+      type: "url",
+      title: director.name,
+      backdropPath: imageUrl(director.image),
+      link: link
+    };
+  });
+}
+
+async function loadDetail(link) {
+  const key = String(link || "");
+  if (!key.startsWith("director:")) return null;
+  const id = Number(key.slice("director:".length));
+  if (!Number.isFinite(id)) return null;
+
+  const person = await Widget.tmdb.get("person/" + id, { params: { language: "zh-CN" } });
+  if (!person) return null;
+
+  const credits = await Widget.tmdb.get("person/" + id + "/combined_credits", { params: { language: "zh-CN" } });
+  const relatedItems = [];
+  const seen = {};
+
+  if (credits && Array.isArray(credits.crew)) {
+    for (const item of credits.crew) {
+      if (!item || !item.id) continue;
+      if (item.media_type !== "movie" && item.media_type !== "tv") continue;
+      if (item.department !== "Directing") continue;
+      if (item.job && item.job !== "Director" && item.job !== "Co-Director") continue;
+
+      const workKey = item.media_type + ":" + item.id;
+      if (seen[workKey]) continue;
+      seen[workKey] = true;
+
+      relatedItems.push({
+        id: item.id,
+        type: "tmdb",
+        mediaType: item.media_type,
+        title: item.title || item.name || "",
+        posterPath: item.poster_path,
+        backdropPath: item.backdrop_path,
+        releaseDate: item.release_date || item.first_air_date,
+        rating: item.vote_average,
+        description: item.overview
+      });
+    }
+  }
+
+  relatedItems.sort((a, b) => String(b.releaseDate || "").localeCompare(String(a.releaseDate || "")));
+
+  const result = {
+    id: key,
+    type: "url",
+    title: person.name || "",
+    link: key,
+    description: person.biography || "",
+    relatedItems: relatedItems.slice(0, 40)
+  };
+
+  if (person.profile_path) {
+    result.posterPath = "https://image.tmdb.org/t/p/w500" + person.profile_path;
+  }
+  return result;
 }
